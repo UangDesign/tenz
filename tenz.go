@@ -141,38 +141,52 @@ func unPackGZ(srcFile, dirname string) (err error) {
 	return err
 }
 
-func tarReaderFunc(tarReader *tar.Reader, dirname string) (err error) {
+func tarReaderFunc(tarReader *tar.Reader, dirname string) error {
 	for {
 		tarHeader, err := tarReader.Next()
 		if err != nil {
 			if err == io.EOF {
 				break
 			} else {
-				err = fmt.Errorf("tarReader next failed, err is:%v", err)
+				return fmt.Errorf("tarReader next failed, err is:%v", err)
 			}
 		}
 		filename := path.Join(dirname, tarHeader.Name)
-		if tarHeader.FileInfo().IsDir() {
-			if err := os.MkdirAll(filename, os.FileMode(0755)); err != nil {
-				err = fmt.Errorf("unpack tar to crate dir failed, err is:%v", err)
+		switch tarHeader.Typeflag {
+		case tar.TypeDir:
+			if err = os.MkdirAll(filename, os.FileMode(0755)); err != nil {
+				return fmt.Errorf("unpack tar to crate dir failed, err is:%v", err)
 			}
-		} else {
+		case tar.TypeReg:
 			pathDirName := path.Dir(filename)
-			if _, err := os.Lstat(pathDirName); err != nil {
-				if err := os.MkdirAll(pathDirName, os.FileMode(0755)); err != nil {
-					err = fmt.Errorf("unpack tar to crate dir failed, err is:%v", err)
+			if _, err = os.Lstat(pathDirName); err != nil {
+				if err = os.MkdirAll(pathDirName, os.FileMode(0755)); err != nil {
+					return fmt.Errorf("unpack tar to crate dir failed, err is:%v", err)
 				}
 			}
 			file, err := os.Create(filename)
 			defer file.Close()
 			if err != nil {
-				err = fmt.Errorf("create file to copy failed, err is:%v", err)
+				return fmt.Errorf("create file to copy failed, err is:%v", err)
 			} else {
-				if _, err := io.Copy(file, tarReader); err != nil {
-					err = fmt.Errorf("unzip to copy file failed, err is:%v", err)
+				if _, err = io.Copy(file, tarReader); err != nil {
+					return fmt.Errorf("unzip to copy file failed, err is:%v", err)
 				}
+			}
+		case tar.TypeSymlink:
+			pathDirName := path.Dir(filename)
+			if err = os.MkdirAll(pathDirName, os.FileMode(0755)); err != nil {
+				return fmt.Errorf("make dir for file, err:%v", err)
+			}
+			if _, err = os.Lstat(filename); err == nil {
+				if err = os.Remove(filename); err != nil {
+					return fmt.Errorf("failed to unlink:%v", err)
+				}
+			}
+			if err = os.Symlink(tarHeader.Linkname, filename); err != nil {
+				return fmt.Errorf("make symbolic link:%v", err)
 			}
 		}
 	}
-	return err
+	return nil
 }
